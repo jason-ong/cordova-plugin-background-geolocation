@@ -124,7 +124,8 @@ enum {
     
     NSLog(@"%@", config);
     
-    locationManager.pausesLocationUpdatesAutomatically = YES;
+    // Customization: pausesLocationUpdatesAutomatically to NO, to avoid IOS stop updating after 20-30min 
+    locationManager.pausesLocationUpdatesAutomatically = NO;
     locationManager.activityType = [_config decodeActivityType];
     locationManager.distanceFilter = _config.distanceFilter; // meters
     locationManager.desiredAccuracy = [_config decodeDesiredAccuracy];
@@ -209,7 +210,7 @@ enum {
     isStarted = NO;
     
     [self stopUpdatingLocation];
-    [self stopMonitoringSignificantLocationChanges];
+//    [self stopMonitoringSignificantLocationChanges];
     [self stopMonitoringForRegion];
     
     return YES;
@@ -232,27 +233,25 @@ enum {
 {
     NSLog(@"BackgroundGeolocationDelegate switchMode %lu", (unsigned long)mode);
     
-    if (!isStarted) {
-        return;
-    }
-    
     operationMode = mode;
     aquireStartTime = [NSDate date];
     
     if (_config.isDebugging) {
         AudioServicesPlaySystemSound (operationMode  == FOREGROUND ? paceChangeYesSound : paceChangeNoSound);
     }
-    
-    if (operationMode == FOREGROUND) {
-        isAcquiringSpeed = YES;
-        isAcquiringStationaryLocation = NO;
-        [self stopMonitoringForRegion];
-        [self stopMonitoringSignificantLocationChanges];
-    } else {
-        isAcquiringSpeed = NO;
-        isAcquiringStationaryLocation = YES;
-        [self startMonitoringSignificantLocationChanges];
-    }
+
+//    Customization
+//    if (operationMode == FOREGROUND) {
+//        isAcquiringSpeed = YES;
+//        isAcquiringStationaryLocation = NO;
+//        [self stopMonitoringForRegion];
+//        [self stopMonitoringSignificantLocationChanges];
+//    } else {
+//        isAcquiringSpeed = NO;
+//        isAcquiringStationaryLocation = YES;
+//        [self startMonitoringSignificantLocationChanges];
+//    }
+//    Customization end
     
     // Crank up the GPS power temporarily to get a good fix on our current location
     [self stopUpdatingLocation];
@@ -354,7 +353,7 @@ enum {
 {
     // Sanity-check the duration of last bgTask:  If greater than 30s, kill it.
     if (bgTask != UIBackgroundTaskInvalid) {
-        if (-[lastBgTaskAt timeIntervalSinceNow] > 30.0) {
+        if (-[lastBgTaskAt timeIntervalSinceNow] > 20.0) {
             NSLog(@"BackgroundGeolocationDelegate#flushQueue has to kill an out-standing background-task!");
             if (_config.isDebugging) {
                 [self notify:@"Outstanding bg-task was force-killed"];
@@ -363,23 +362,17 @@ enum {
         }
         return;
     }
+    
+     bgTask = [self createBackgroundTask];
     if ([locationQueue count] > 0) {
-        // Create a background-task and delegate to Javascript for syncing location
-        bgTask = [self createBackgroundTask];
         dispatch_async(dispatch_get_main_queue(), ^{
+            // Customization: Just post back the latest location
             BackgroundLocation *postLocation = [locationQueue lastObject];
-            NSArray *locationsToPost = [[NSArray alloc] initWithObjects:[postLocation toDictionary], nil];
-            if ([self postJSON:locationsToPost]) {
-                // clear queue
-                SQLiteLocationDAO* locationDAO = [SQLiteLocationDAO sharedInstance];
-                [locationDAO deleteLocation:postLocation.id];
-            }
-            
-            // send first queued location to client js (to mimic FIFO)
-            BackgroundLocation *location = [locationQueue firstObject];
-            [self sync:location];
-            [locationQueue removeObject:location];
+            [self sync:postLocation];
+            [locationQueue removeAllObjects];
         });
+    } else {
+        NSLog(@"Jason - No location Queue");
     }
 }
 
@@ -450,96 +443,29 @@ enum {
         [self startUpdatingLocation];
     }
     
-    if (operationMode == BACKGROUND && !isAcquiringStationaryLocation && !stationaryRegion) {
-        // Perhaps our GPS signal was interupted, re-acquire a stationaryLocation now.
-        [self switchMode:operationMode];
-    }
-    
-    for (CLLocation *location in locations) {
-        BackgroundLocation *bgloc = [BackgroundLocation fromCLLocation:location];
-        bgloc.type = @"current";
+//    if (operationMode == BACKGROUND && !isAcquiringStationaryLocation && !stationaryRegion) {
+//        // Perhaps our GPS signal was interupted, re-acquire a stationaryLocation now.
+//        [self switchMode:operationMode];
+//    }
+        
+    CLLocation *location = [locations lastObject];
+    BackgroundLocation *bgloc = [BackgroundLocation fromCLLocation:location];
+    bgloc.type = @"current";
 
-        // test the age of the location measurement to determine if the measurement is cached
-        // in most cases you will not want to rely on cached measurements
-        NSLog(@"Location age %f", [bgloc locationAge]);
-        if ([bgloc locationAge] > maxLocationAgeInSeconds || ![bgloc isValid]) {
-            continue;
-        }
-        
-        if (lastLocation == nil) {
-            lastLocation = bgloc;
-            continue;
-        }
-        
-        if ([bgloc isBetterLocation:lastLocation]) {
-            NSLog(@"Better location found: %@", bgloc);
-            lastLocation = bgloc;
-        }
+    if (lastLocation == nil) {
+        lastLocation = bgloc;
+    }
+
+    if ([bgloc isBetterLocation:lastLocation]) {
+        NSLog(@"Better location found: %@", bgloc);
+        lastLocation = bgloc;
     }
     
     if (lastLocation == nil) {
         return;
     }
     
-    // test the measurement to see if it is more accurate than the previous measurement
-    if (isAcquiringStationaryLocation) {
-        NSLog(@"Acquiring stationary location, accuracy: %@", lastLocation.accuracy);
-        if (_config.isDebugging) {
-            AudioServicesPlaySystemSound (acquiringLocationSound);
-        }
-
-        if ([lastLocation.accuracy doubleValue] <= [[NSNumber numberWithInteger:_config.desiredAccuracy] doubleValue]) {
-            NSLog(@"BackgroundGeolocationDelegate found most accurate stationary before timeout");
-        } else if (-[aquireStartTime timeIntervalSinceNow] < maxLocationWaitTimeInSeconds) {
-            // we still have time to aquire better location
-            return;
-        }
-
-        isAcquiringStationaryLocation = NO;
-        [self stopUpdatingLocation]; //saving power while monitoring region
-
-        BackgroundLocation *stationaryLocation = [lastLocation copy];
-        stationaryLocation.type = @"stationary";
-        [self startMonitoringStationaryRegion:stationaryLocation];
-        // fire onStationary @event for Javascript.
-        [self queue:stationaryLocation];
-    } else if (isAcquiringSpeed) {
-        if (_config.isDebugging) {
-            AudioServicesPlaySystemSound (acquiringLocationSound);
-        }
-
-        if ([lastLocation.accuracy doubleValue] <= [[NSNumber numberWithInteger:_config.desiredAccuracy] doubleValue]) {
-            NSLog(@"BackgroundGeolocationDelegate found most accurate location before timeout");
-        } else if (-[aquireStartTime timeIntervalSinceNow] < maxLocationWaitTimeInSeconds) {
-            // we still have time to aquire better location
-            return;
-        }
-
-        if (_config.isDebugging) {
-            [self notify:@"Aggressive monitoring engaged"];
-        }
-
-        // We should have a good sample for speed now, power down our GPS as configured by user.
-        isAcquiringSpeed = NO;
-        locationManager.desiredAccuracy = _config.desiredAccuracy;
-        locationManager.distanceFilter = [self calculateDistanceFilter:[lastLocation.speed floatValue]];
-        [self startUpdatingLocation];
-        
-    } else if (operationMode == FOREGROUND) {
-        // Adjust distanceFilter incrementally based upon current speed
-        float newDistanceFilter = [self calculateDistanceFilter:[lastLocation.speed floatValue]];
-        if (newDistanceFilter != locationManager.distanceFilter) {
-            NSLog(@"BackgroundGeolocationDelegate updated distanceFilter, new: %f, old: %f", newDistanceFilter, locationManager.distanceFilter);
-            locationManager.distanceFilter = newDistanceFilter;
-            [self startUpdatingLocation];
-        }
-    } else if ([self locationIsBeyondStationaryRegion:lastLocation]) {
-        if (_config.isDebugging) {
-            [self notify:@"Manual stationary exit-detection"];
-        }
-        [self switchMode:operationMode];
-    }
-    
+    // Customization: Remove all the battery saving checking   
     [self queue:lastLocation];
 }
 
