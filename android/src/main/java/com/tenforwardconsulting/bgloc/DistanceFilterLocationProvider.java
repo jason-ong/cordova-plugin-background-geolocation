@@ -242,59 +242,59 @@ public class DistanceFilterLocationProvider extends AbstractLocationProvider imp
         if (config.isDebugging()) {
             Toast.makeText(context, "mv:" + isMoving + ",acy:" + location.getAccuracy() + ",v:" + location.getSpeed() + ",df:" + scaledDistanceFilter, Toast.LENGTH_LONG).show();
         }
-        if (isAcquiringStationaryLocation) {
-            if (stationaryLocation == null || stationaryLocation.getAccuracy() > location.getAccuracy()) {
-                stationaryLocation = location;
-            }
-            if (++locationAcquisitionAttempts == MAX_STATIONARY_ACQUISITION_ATTEMPTS) {
-                isAcquiringStationaryLocation = false;
-                startMonitoringStationaryRegion(stationaryLocation);
-                if (config.isDebugging()) {
-                    startTone("long_beep");
-                }
-            } else {
-                // Unacceptable stationary-location: bail-out and wait for another.
-                if (config.isDebugging()) {
-                    startTone("beep");
-                }
-                return;
-            }
-        } else if (isAcquiringSpeed) {
-            if (++locationAcquisitionAttempts == MAX_SPEED_ACQUISITION_ATTEMPTS) {
-                // Got enough samples, assume we're confident in reported speed now.  Play "woohoo" sound.
-                if (config.isDebugging()) {
-                    startTone("doodly_doo");
-                }
-                isAcquiringSpeed = false;
-                scaledDistanceFilter = calculateDistanceFilter(location.getSpeed());
-                setPace(true);
-            } else {
-                if (config.isDebugging()) {
-                    startTone("beep");
-                }
-                return;
-            }
-        } else if (isMoving) {
-            if (config.isDebugging()) {
-                startTone("beep");
-            }
-            // Only reset stationaryAlarm when accurate speed is detected, prevents spurious locations from resetting when stopped.
-            if ( (location.getSpeed() >= 1) && (location.getAccuracy() <= config.getStationaryRadius()) ) {
-                resetStationaryAlarm();
-            }
-            // Calculate latest distanceFilter, if it changed by 5 m/s, we'll reconfigure our pace.
-            Integer newDistanceFilter = calculateDistanceFilter(location.getSpeed());
-            if (newDistanceFilter != scaledDistanceFilter.intValue()) {
-                Log.i(TAG, "- updated distanceFilter, new: " + newDistanceFilter + ", old: " + scaledDistanceFilter);
-                scaledDistanceFilter = newDistanceFilter;
-                setPace(true);
-            }
-            if (location.distanceTo(lastLocation) < config.getDistanceFilter()) {
-                return;
-            }
-        } else if (stationaryLocation != null) {
-            return;
-        }
+        // if (isAcquiringStationaryLocation) {
+        //     if (stationaryLocation == null || stationaryLocation.getAccuracy() > location.getAccuracy()) {
+        //         stationaryLocation = location;
+        //     }
+        //     if (++locationAcquisitionAttempts == MAX_STATIONARY_ACQUISITION_ATTEMPTS) {
+        //         isAcquiringStationaryLocation = false;
+        //         startMonitoringStationaryRegion(stationaryLocation);
+        //         if (config.isDebugging()) {
+        //             startTone("long_beep");
+        //         }
+        //     } else {
+        //         // Unacceptable stationary-location: bail-out and wait for another.
+        //         if (config.isDebugging()) {
+        //             startTone("beep");
+        //         }
+        //         return;
+        //     }
+        // } else if (isAcquiringSpeed) {
+        //     if (++locationAcquisitionAttempts == MAX_SPEED_ACQUISITION_ATTEMPTS) {
+        //         // Got enough samples, assume we're confident in reported speed now.  Play "woohoo" sound.
+        //         if (config.isDebugging()) {
+        //             startTone("doodly_doo");
+        //         }
+        //         isAcquiringSpeed = false;
+        //         scaledDistanceFilter = calculateDistanceFilter(location.getSpeed());
+        //         setPace(true);
+        //     } else {
+        //         if (config.isDebugging()) {
+        //             startTone("beep");
+        //         }
+        //         return;
+        //     }
+        // } else if (isMoving) {
+        //     if (config.isDebugging()) {
+        //         startTone("beep");
+        //     }
+        //     // Only reset stationaryAlarm when accurate speed is detected, prevents spurious locations from resetting when stopped.
+        //     if ( (location.getSpeed() >= 1) && (location.getAccuracy() <= config.getStationaryRadius()) ) {
+        //         resetStationaryAlarm();
+        //     }
+        //     // Calculate latest distanceFilter, if it changed by 5 m/s, we'll reconfigure our pace.
+        //     Integer newDistanceFilter = calculateDistanceFilter(location.getSpeed());
+        //     if (newDistanceFilter != scaledDistanceFilter.intValue()) {
+        //         Log.i(TAG, "- updated distanceFilter, new: " + newDistanceFilter + ", old: " + scaledDistanceFilter);
+        //         scaledDistanceFilter = newDistanceFilter;
+        //         setPace(true);
+        //     }
+        //     if (location.distanceTo(lastLocation) < config.getDistanceFilter()) {
+        //         return;
+        //     }
+        // } else if (stationaryLocation != null) {
+        //     return;
+        // }
         // Go ahead and cache, push to server
         lastLocation = location;
         handleLocation(location);
